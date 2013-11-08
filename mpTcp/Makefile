@@ -1,13 +1,12 @@
-LIB = -lpthread
 CC = gcc
  
 all: server client
  
 server: server.c
-	$(CC) -o server server.c $(LIB)
+	$(CC) -o server server.c
  
 client: client.c
-	$(CC) -o client client.c $(LIB)
+	$(CC) -o client client.c
  
 clean:
 	/bin/rm -f client server core *.o *~

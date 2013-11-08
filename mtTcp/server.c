@@ -1,73 +1,97 @@
-/* server program, run this first */
-/* tcp version */
-
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
-#include <pthread.h> #including pthreads lib for threading
+#include <stdio.h>
+#include <pthread.h>
 
-main()
-{
-	int sockint, s; /* socket for accepting connections */
-	int namelen; /* length of client name */
-	int ns; /* client socket */
-	struct sockaddr_in client; /* client address information */
-	struct sockaddr_in server; /* server address information */
-	char buf[32]; /* data buffer */
+/*
+    Multi thread concurrent server
 
-	s = socket(AF_INET, SOCK_STREAM, 0); /* create stream socket using TCP */
-	if( s == -1 ) {
-		fprintf(stderr, "socket() Socket was not created.\n");
-		exit(2);
-	}
-	else
-		fprintf(stderr,"Socket created successfully.\n");
+    This program has to be killed to terminate, or alternately it will abort in
+    120 seconds on an alarm...
+*/
 
-	server.sin_family = AF_INET; /* set up the server name */
-	server.sin_port = 0; /* use first available port number */
-	server.sin_addr.s_addr = INADDR_ANY;
+#define PORTNUMBER 4545
 
-	if( bind(s, &server, sizeof( server )) < 0 ) { /* bind server address to socket */
-		fprintf(stderr,"bind() Error binding server.\n");
-		exit(3);
-	}
+struct serverParm {
+           int connectionDesc;
+       };
 
-	/* find out what port was assigned */
-	namelen = sizeof( server );
-	if( getsockname( s, (struct sockaddr *) &server, &namelen) < 0 ) {
-		fprintf(stderr, "getsockname() failed to get port number\n");
-		exit(4);
-	}
-	fprintf(stderr,"The assigned port is %d\n", ntohs( server.sin_port));
+void *serverThread(void *parmPtr) {
+#define PARMPTR ((struct serverParm *) parmPtr)
+    int recievedMsgLen;
+    char messageBuf[1025];
 
-	if( listen(s, 1) != 0 ) { /* listen for a connection */
-		fprintf(stderr, "listen() failed\n");
-		exit(5);
-	}
+    /* Server thread code to deal with message processing */
+    printf("DEBUG: connection made, connectionDesc=%d\n",
+            PARMPTR->connectionDesc);
+    if (PARMPTR->connectionDesc < 0) {
+        printf("Accept failed\n");
+        return(0);    /* Exit thread */
+    }
+    
+    /* Receive messages from sender... */
+    while ((recievedMsgLen=
+            read(PARMPTR->connectionDesc,messageBuf,sizeof(messageBuf)-1)) > 0) 
+    {
+        recievedMsgLen[messageBuf] = '\0';
+        printf("Message: %s\n",messageBuf);
+        if (write(PARMPTR->connectionDesc,"GOT IT\0",7) < 0) {
+               perror("Server: write error");
+               return(0);
+           }
+    }
+    close(PARMPTR->connectionDesc);  /* Avoid descriptor leaks */
+    free(PARMPTR);                   /* And memory leaks */
+    return(0);                       /* Exit thread */
+}
 
-	namelen = sizeof(client); /* accept connection request */
-	if( (ns = accept(s, &client, &namelen)) == -1) {
-		fprintf(stderr, "accept() failed to accept client connection request.\n");
-		exit(6);
-	}
+main () {
+    int listenDesc;
+    struct sockaddr_in myAddr;
+    struct serverParm *parmPtr;
+    int connectionDesc;
+    pthread_t threadID;
 
-	if( recv(ns, buf, sizeof(buf), 0) == -1 ) { /* wait for a client message to arrive */
-		fprintf(stderr, "recv() did not get client data\n");
-		exit(7);
-	}
+    /* For testing purposes, make sure process will terminate eventually */
+    alarm(120);  /* Terminate in 120 seconds */
 
-	if( send( ns, buf, sizeof(buf), 0) < 0) { /* echo the client message back to the client */
-		fprintf(stderr, "send() failed to send data back to client.\n");
-		exit(8);
-	}
+    /* Create socket from which to read */
+    if ((listenDesc = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("open error on socket");
+        exit(1);
+    }
 
-	close(ns); /* close client socket connection */
-	close(s); /* close server socket connection */
+    /* Create "name" of socket */
+    myAddr.sin_family = AF_INET;
+    myAddr.sin_addr.s_addr = INADDR_ANY;
+    myAddr.sin_port = htons(PORTNUMBER);
+        
+    if (bind(listenDesc, (struct sockaddr *) &myAddr, sizeof(myAddr)) < 0) {
+        perror("bind error");
+        exit(1);
+    }
 
-	printf("Server finished.\n");
-	exit(0);
+    /* Start accepting connections.... */
+    /* Up to 5 requests for connections can be queued... */
+    listen(listenDesc,5);
+
+    while (1) /* Do forever */ {
+        /* Wait for a client connection */
+        connectionDesc = accept(listenDesc, NULL, NULL);
+
+        /* Create a thread to actually handle this client */
+        parmPtr = (struct serverParm *)malloc(sizeof(struct serverParm));
+        parmPtr->connectionDesc = connectionDesc;
+        if (pthread_create(&threadID, NULL, serverThread, (void *)parmPtr) 
+              != 0) {
+            perror("Thread create error");
+            close(connectionDesc);
+            close(listenDesc);
+            exit(1);
+        }
+
+        printf("Parent ready for another connection\n");
+    }
+
 }
