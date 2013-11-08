@@ -1,4 +1,4 @@
-concurrent-client-server
+Concurent Client Server
 ========================
 
 A concurrent client server implementation in C.
